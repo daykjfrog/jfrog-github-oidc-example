@@ -21,6 +21,9 @@ jobs:
         with:
           oidc-provider-name: github-oidc-dy
           oidc-audience: jfrog-github
+          disable-auto-evidence-collection: true
+          disable-auto-build-publish: true
+          disable-job-summary: true
 
       - name: Prove OIDC login
         run: jf rt ping
