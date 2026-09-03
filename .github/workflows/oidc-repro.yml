@@ -1,0 +1,45 @@
+name: JFrog OIDC repro
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  id-token: write   # required for GitHub OIDC
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    env:
+      OIDC_PROVIDER: github          # must match Platform "Provider Name"
+      OIDC_AUDIENCE: jfrog-github    # must match Platform "Audience"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI (OIDC exchange)
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+        with:
+          oidc-provider-name: ${{ env.OIDC_PROVIDER }}
+          oidc-audience: ${{ env.OIDC_AUDIENCE }}
+
+      - name: Prove OIDC login worked
+        run: |
+          jf rt ping
+          jf rt curl -sI /api/system/ping
+
+      - name: Checksum search (customer hop)
+        run: |
+          SHA=$(jf rt curl -s /api/storage/dayk-fed-gen/new.txt | jq -r '.checksums.sha256')
+          echo "sha256=$SHA"
+          jf rt curl -sD - "/api/search/checksum?sha256=${SHA}"
+
+      - name: Evidence create via CLI (control)
+        run: |
+          jf evd create \
+            --subject-repo-path dayk-fed-gen/new.txt \
+            --predicate '{"foo":"bar"}' \
+            --predicate-type https://jfrog.com/evidence/approval/v1 \
+            --key-alias dy-evidence-key \
+            --provider-id my-ci
