@@ -42,13 +42,18 @@ jobs:
             exit 1
           fi
 
+          PLATFORM_URL="${JF_URL%/}"
+          PLATFORM_URL="${PLATFORM_URL%/artifactory}"
+          echo "JF_URL secret (normalized)=${PLATFORM_URL}"
+          echo "prepare URL=${PLATFORM_URL}/evidence/api/v1/evidence/prepare?include_pae=true"
+
           printf '%s\n' "$EVIDENCE_PRIVATE_KEY" > "$RUNNER_TEMP/private.pem"
 
           echo "=== STEP 1: prepare ==="
           HTTP=$(curl -sS -o "$RUNNER_TEMP/prep.json" -w '%{http_code}' \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            -X POST "${JF_URL}/evidence/api/v1/evidence/prepare?include_pae=true" \
+            -X POST "${PLATFORM_URL}/evidence/api/v1/evidence/prepare?include_pae=true" \
             -d '{
               "predicate": { "source": "gha-repro" },
               "predicate_type": "https://jfrog.com/evidence/approval/v1",
@@ -86,9 +91,9 @@ jobs:
             }' > "$RUNNER_TEMP/dsse.json"
 
           echo "=== STEP 3: deploy post_url ==="
-          echo "POST ${JF_URL}${POST_URL}"
+          echo "POST ${PLATFORM_URL}${POST_URL}"
           curl -sS -D - \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            -X POST "${JF_URL}${POST_URL}" \
+            -X POST "${PLATFORM_URL}${POST_URL}" \
             --data-binary @"$RUNNER_TEMP/dsse.json"
