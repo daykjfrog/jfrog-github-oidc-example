@@ -77,7 +77,9 @@ jobs:
           jq -r '.pre_authentication_encoding' "$RUNNER_TEMP/prep.json" > "$RUNNER_TEMP/pae.txt"
           echo "post_url=${POST_URL}"
 
-          echo "=== STEP 2: sign PAE ==="
+                    echo "=== STEP 2: sign PAE ==="
+          jq -j '.pre_authentication_encoding' "$RUNNER_TEMP/prep.json" > "$RUNNER_TEMP/pae.txt"
+
           SIG=$(openssl dgst -sha256 -sign "$RUNNER_TEMP/private.pem" "$RUNNER_TEMP/pae.txt" | openssl base64 -A)
 
           jq -n \
@@ -92,8 +94,11 @@ jobs:
 
           echo "=== STEP 3: deploy post_url ==="
           echo "POST ${PLATFORM_URL}${POST_URL}"
-          curl -sS -D - \
+          HTTP_DEP=$(curl -sS -o "$RUNNER_TEMP/deploy.json" -w '%{http_code}' \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
             -X POST "${PLATFORM_URL}${POST_URL}" \
-            --data-binary @"$RUNNER_TEMP/dsse.json"
+            --data-binary @"$RUNNER_TEMP/dsse.json")
+          echo "deploy HTTP ${HTTP_DEP}"
+          cat "$RUNNER_TEMP/deploy.json"
+          echo
