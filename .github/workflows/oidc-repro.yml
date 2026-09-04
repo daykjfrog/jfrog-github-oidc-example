@@ -1,8 +1,7 @@
-name: JFrog OIDC repro
+name: JFrog prepare-sign-deploy repro
 
 on:
   workflow_dispatch:
-  push:
 
 permissions:
   id-token: write
@@ -25,11 +24,69 @@ jobs:
           disable-auto-build-publish: true
           disable-job-summary: true
 
-      - name: Prove OIDC login
-        run: jf rt ping
-
-      - name: Checksum search (customer hop)
+      - name: Prepare, sign PAE, deploy to post_url
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
         run: |
-          SHA=$(jf rt curl -s /api/storage/dayk-fed-gen/new.txt | jq -r '.checksums.sha256')
-          echo "sha256=${SHA}"
-          jf rt curl -sD - "/api/search/checksum?sha256=${SHA}"
+          set -euo pipefail
+
+          TOKEN=$(jq -r '
+            .servers[0].accessToken // .servers[0].password // empty
+          ' "$HOME/.jfrog/jfrog-cli.conf.v2")
+          if [ -z "$TOKEN" ]; then
+            echo "Could not read Access token from JFrog CLI config"
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+
+          printf '%s\n' "$EVIDENCE_PRIVATE_KEY" > "$RUNNER_TEMP/private.pem"
+
+          echo "=== STEP 1: prepare ==="
+          HTTP=$(curl -sS -o "$RUNNER_TEMP/prep.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -X POST "${JF_URL}/evidence/api/v1/evidence/prepare?include_pae=true" \
+            -d '{
+              "predicate": { "source": "gha-repro" },
+              "predicate_type": "https://jfrog.com/evidence/approval/v1",
+              "provider_id": "my-ci",
+              "subject": {
+                "subject_type": "artifact",
+                "repo_path": "dayk-fed-gen/new.txt"
+              }
+            }')
+          echo "prepare HTTP ${HTTP}"
+          cat "$RUNNER_TEMP/prep.json"
+          echo
+          if [ "$HTTP" != "200" ]; then
+            echo "prepare failed"
+            exit 1
+          fi
+
+          POST_URL=$(jq -r '.post_url' "$RUNNER_TEMP/prep.json")
+          PAYLOAD=$(jq -r '.dsse_payload' "$RUNNER_TEMP/prep.json")
+          PTYPE=$(jq -r '.dsse_payload_type' "$RUNNER_TEMP/prep.json")
+          jq -r '.pre_authentication_encoding' "$RUNNER_TEMP/prep.json" > "$RUNNER_TEMP/pae.txt"
+          echo "post_url=${POST_URL}"
+
+          echo "=== STEP 2: sign PAE ==="
+          SIG=$(openssl dgst -sha256 -sign "$RUNNER_TEMP/private.pem" "$RUNNER_TEMP/pae.txt" | openssl base64 -A)
+
+          jq -n \
+            --arg payload "$PAYLOAD" \
+            --arg ptype "$PTYPE" \
+            --arg sig "$SIG" \
+            '{
+              payload: $payload,
+              payloadType: $ptype,
+              signatures: [{ keyid: "dy-evidence-key", sig: $sig }]
+            }' > "$RUNNER_TEMP/dsse.json"
+
+          echo "=== STEP 3: deploy post_url ==="
+          echo "POST ${JF_URL}${POST_URL}"
+          curl -sS -D - \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -X POST "${JF_URL}${POST_URL}" \
+            --data-binary @"$RUNNER_TEMP/dsse.json"
