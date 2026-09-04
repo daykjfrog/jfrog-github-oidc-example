@@ -60,7 +60,7 @@ jobs:
               "provider_id": "my-ci",
               "subject": {
                 "subject_type": "artifact",
-                "repo_path": "dayk-fed-gen/new.txt"
+                "repo_path": "dayk-fed-gen/some.txt"
               }
             }')
           echo "prepare HTTP ${HTTP}"
